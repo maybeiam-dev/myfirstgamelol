@@ -15,6 +15,11 @@
     <div class="splash-glow"></div>
     <div class="splash-content">
       <div class="splash-kicker">debut edition</div>
+      <div class="hero-mark hero-mark-large" aria-hidden="true">
+        <span class="hero-orbit"></span>
+        <span class="hero-core">FK</span>
+        <span class="hero-tail"></span>
+      </div>
       <h1 class="splash-title">FIRST KIRILL GAME</h1>
       <p class="splash-subtitle">Snake made for phone play</p>
     </div>
@@ -23,8 +28,17 @@
   <main class="app">
     <section class="topbar">
       <div class="brand">
-        <div class="brand-title">First Kirill Game</div>
-        <div class="brand-subtitle">Snake web version</div>
+        <div class="brand-row">
+          <div class="hero-mark" aria-hidden="true">
+            <span class="hero-orbit"></span>
+            <span class="hero-core">FK</span>
+            <span class="hero-tail"></span>
+          </div>
+          <div>
+            <div class="brand-title">First Kirill Game</div>
+            <div class="brand-subtitle">Snake web version</div>
+          </div>
+        </div>
       </div>
       <div class="stats">
         <div class="stat">
@@ -50,14 +64,40 @@
 
     <section class="actions">
       <button id="restartButton" class="secondary-button">Restart</button>
-      <p class="hint">Swipe on the field or use the buttons below</p>
+      <p class="hint" id="hintText">Swipe on the field or use the buttons below</p>
+    </section>
+
+    <section class="skins-panel" aria-label="Skins">
+      <div class="skin-card">
+        <span class="skin-name">Green</span>
+        <span class="skin-rule">default</span>
+      </div>
+      <div class="skin-card">
+        <span class="skin-name">Blue</span>
+        <span class="skin-rule">unlock at 20 apples</span>
+      </div>
+      <div class="skin-card">
+        <span class="skin-name">Gold</span>
+        <span class="skin-rule">unlock at 50 apples</span>
+      </div>
+    </section>
+
+    <section class="leaderboard-panel" aria-label="Leaderboard">
+      <div class="leaderboard-head">
+        <div>
+          <h3>Leaderboard</h3>
+          <p id="rankMessage">Play a round to enter the ranking</p>
+        </div>
+        <button id="clearBoardButton" class="secondary-button mini-button">Clear</button>
+      </div>
+      <ol class="leaderboard-list" id="leaderboardList"></ol>
     </section>
 
     <section class="controls" aria-label="Controls">
-      <button class="control control-up" data-dir="up" aria-label="Up">▲</button>
-      <button class="control control-left" data-dir="left" aria-label="Left">◀</button>
-      <button class="control control-right" data-dir="right" aria-label="Right">▶</button>
-      <button class="control control-down" data-dir="down" aria-label="Down">▼</button>
+      <button class="control control-up" data-dir="up" aria-label="Up">&#9650;</button>
+      <button class="control control-left" data-dir="left" aria-label="Left">&#9664;</button>
+      <button class="control control-right" data-dir="right" aria-label="Right">&#9654;</button>
+      <button class="control control-down" data-dir="down" aria-label="Down">&#9660;</button>
     </section>
   </main>
 

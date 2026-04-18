@@ -4,26 +4,47 @@ const INITIAL_SPEED = 170;
 const MIN_SPEED = 85;
 const SPEED_STEP = 4;
 const SPLASH_DURATION = 6500;
+const LEADERBOARD_LIMIT = 7;
 
 const COLORS = {
   boardLight: "#aad751",
   boardDark: "#a2d149",
-  head: "#3f7d20",
-  body: "#5fa837",
   apple: "#e53935",
   eye: "#f7ffe9",
   stem: "#5d7f27",
+};
+
+const SKINS = {
+  green: {
+    head: "#3f7d20",
+    body: "#5fa837",
+    name: "Green",
+  },
+  blue: {
+    head: "#2268c7",
+    body: "#49a2ff",
+    name: "Blue",
+  },
+  gold: {
+    head: "#d69d12",
+    body: "#f2cf57",
+    name: "Gold",
+  },
 };
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const scoreNode = document.getElementById("score");
 const bestNode = document.getElementById("best");
+const hintNode = document.getElementById("hintText");
+const rankMessageNode = document.getElementById("rankMessage");
+const leaderboardListNode = document.getElementById("leaderboardList");
 const overlay = document.getElementById("overlay");
 const overlayTitle = document.getElementById("overlayTitle");
 const overlayText = document.getElementById("overlayText");
 const startButton = document.getElementById("startButton");
 const restartButton = document.getElementById("restartButton");
+const clearBoardButton = document.getElementById("clearBoardButton");
 const controlButtons = document.querySelectorAll(".control");
 const splashScreen = document.getElementById("splashScreen");
 
@@ -33,15 +54,25 @@ let nextDirection = { x: 1, y: 0 };
 let apple = null;
 let score = 0;
 let best = Number(localStorage.getItem("snake-best") || "0");
+let unlockedSkin = localStorage.getItem("snake-skin") || "green";
+let leaderboard = loadLeaderboard();
 let speed = INITIAL_SPEED;
 let running = false;
 let timerId = null;
 let touchStart = null;
+let swipeLocked = false;
+let audioCtx = null;
+let musicTimerId = null;
+let musicStep = 0;
 
 bestNode.textContent = String(best);
+ensureSkinConsistency();
+updateHint();
+renderLeaderboard();
 
 function resetGame() {
   cancelTick();
+  stopMusic();
   const center = Math.floor(GRID_SIZE / 2);
   snake = Array.from({ length: START_LENGTH }, (_, index) => ({
     x: center - index,
@@ -61,8 +92,11 @@ function startGame() {
   if (running) {
     return;
   }
+  initAudio();
+  resumeAudioContext();
   running = true;
   hideOverlay();
+  startMusic();
   scheduleTick();
 }
 
@@ -101,7 +135,46 @@ function updateScore() {
     best = score;
     bestNode.textContent = String(best);
     localStorage.setItem("snake-best", String(best));
+    unlockSkinFromBest();
   }
+}
+
+function ensureSkinConsistency() {
+  if (!SKINS[unlockedSkin]) {
+    unlockedSkin = "green";
+  }
+
+  if (best >= 50) {
+    unlockedSkin = "gold";
+  } else if (best >= 20 && unlockedSkin === "green") {
+    unlockedSkin = "blue";
+  }
+
+  localStorage.setItem("snake-skin", unlockedSkin);
+}
+
+function unlockSkinFromBest() {
+  const previousSkin = unlockedSkin;
+
+  if (best >= 50) {
+    unlockedSkin = "gold";
+  } else if (best >= 20) {
+    unlockedSkin = "blue";
+  }
+
+  if (unlockedSkin !== previousSkin) {
+    localStorage.setItem("snake-skin", unlockedSkin);
+    updateHint();
+    showOverlay(
+      `${SKINS[unlockedSkin].name} Skin Unlocked`,
+      `Your best score reached ${best}. This skin is now permanent.`,
+      "Play"
+    );
+  }
+}
+
+function updateHint() {
+  hintNode.textContent = `Swipe on the field or use the buttons below. Skin: ${SKINS[unlockedSkin].name}`;
 }
 
 function setDirection(newDir) {
@@ -137,7 +210,8 @@ function tick() {
 
   if (apple && newHead.x === apple.x && newHead.y === apple.y) {
     score += 1;
-    speed = Math.max(MIN_SPEED, speed - SPEED_STEP);
+    speed = Math.max(MIN_DELAY_SAFE(), speed - SPEED_STEP);
+    playEatSound();
     updateScore();
     spawnApple();
     if (!apple) {
@@ -152,18 +226,30 @@ function tick() {
   scheduleTick();
 }
 
-function gameOver() {
+function MIN_DELAY_SAFE() {
+  return MIN_SPEED;
+}
+
+function finishRound(title, text, buttonText) {
   running = false;
   cancelTick();
+  stopMusic();
+  const place = updateLeaderboard(score);
   draw();
-  showOverlay("Game Over", `Final score: ${score}`, "Play Again");
+  if (place > 0) {
+    rankMessageNode.textContent = `You took place #${place} with ${score} points`;
+  } else {
+    rankMessageNode.textContent = `Your score is ${score}. Beat the table to enter top ${LEADERBOARD_LIMIT}`;
+  }
+  showOverlay(title, text, buttonText);
+}
+
+function gameOver() {
+  finishRound("Game Over", `Final score: ${score}`, "Play Again");
 }
 
 function winGame() {
-  running = false;
-  cancelTick();
-  draw();
-  showOverlay("Victory!", `You filled the whole field and scored ${score}.`, "Play Again");
+  finishRound("Victory!", `You filled the whole field and scored ${score}.`, "Play Again");
 }
 
 function showOverlay(title, text, buttonText) {
@@ -235,13 +321,15 @@ function getEyeOffsets(cellSize) {
 }
 
 function drawSnake(cellSize) {
+  const skin = SKINS[unlockedSkin];
+
   snake.forEach((part, index) => {
     const pad = cellSize * 0.08;
     const x = part.x * cellSize + pad;
     const y = part.y * cellSize + pad;
     const size = cellSize - pad * 2;
 
-    ctx.fillStyle = index === 0 ? COLORS.head : COLORS.body;
+    ctx.fillStyle = index === 0 ? skin.head : skin.body;
     roundRect(ctx, x, y, size, size, cellSize * 0.18);
     ctx.fill();
 
@@ -307,10 +395,16 @@ function handleSwipe(endPoint) {
     return;
   }
 
+  swipeLocked = true;
+
   if (absX > absY) {
     setDirection(dx > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 });
   } else {
     setDirection(dy > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 });
+  }
+
+  if (!running) {
+    startGame();
   }
 }
 
@@ -320,11 +414,143 @@ function hideSplash() {
   }, SPLASH_DURATION);
 }
 
+function initAudio() {
+  if (audioCtx) {
+    return;
+  }
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    return;
+  }
+  audioCtx = new AudioContextClass();
+}
+
+function resumeAudioContext() {
+  if (audioCtx && audioCtx.state === "suspended") {
+    audioCtx.resume().catch(() => {});
+  }
+}
+
+function playTone(frequency, duration, volume, type, when = 0) {
+  if (!audioCtx) {
+    return;
+  }
+
+  const startAt = audioCtx.currentTime + when;
+  const oscillator = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, startAt);
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(volume, startAt + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+
+  oscillator.connect(gain);
+  gain.connect(audioCtx.destination);
+  oscillator.start(startAt);
+  oscillator.stop(startAt + duration + 0.04);
+}
+
+function playEatSound() {
+  resumeAudioContext();
+  playTone(740, 0.08, 0.03, "square");
+  playTone(980, 0.12, 0.02, "triangle", 0.04);
+}
+
+function scheduleMusicLoop() {
+  if (!running || !audioCtx) {
+    return;
+  }
+
+  const melody = [262, 330, 392, 330, 294, 349, 440, 349];
+  const bass = [131, 165, 196, 147];
+  playTone(melody[musicStep % melody.length], 0.24, 0.012, "triangle");
+  playTone(bass[musicStep % bass.length], 0.34, 0.005, "sine", 0.03);
+  musicStep += 1;
+  musicTimerId = window.setTimeout(scheduleMusicLoop, 380);
+}
+
+function startMusic() {
+  resumeAudioContext();
+  stopMusic();
+  musicStep = 0;
+  scheduleMusicLoop();
+}
+
+function stopMusic() {
+  if (musicTimerId !== null) {
+    clearTimeout(musicTimerId);
+    musicTimerId = null;
+  }
+}
+
+function loadLeaderboard() {
+  try {
+    const raw = localStorage.getItem("snake-leaderboard");
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLeaderboard() {
+  localStorage.setItem("snake-leaderboard", JSON.stringify(leaderboard));
+}
+
+function updateLeaderboard(value) {
+  if (value <= 0) {
+    renderLeaderboard();
+    return -1;
+  }
+
+  leaderboard.push({
+    score: value,
+    skin: SKINS[unlockedSkin].name,
+    time: new Date().toLocaleDateString(),
+  });
+  leaderboard.sort((a, b) => b.score - a.score);
+  leaderboard = leaderboard.slice(0, LEADERBOARD_LIMIT);
+  saveLeaderboard();
+  renderLeaderboard();
+
+  return leaderboard.findIndex((entry) => entry.score === value && entry.time) + 1;
+}
+
+function renderLeaderboard() {
+  if (!leaderboard.length) {
+    leaderboardListNode.innerHTML = '<li class="leaderboard-item"><span class="leaderboard-place">-</span><div><div class="leaderboard-score">No scores yet</div><div class="rank-line">Your best rounds will appear here</div></div><span class="rank-line">start</span></li>';
+    return;
+  }
+
+  leaderboardListNode.innerHTML = leaderboard
+    .map((entry, index) => `
+      <li class="leaderboard-item">
+        <span class="leaderboard-place">${index + 1}</span>
+        <div>
+          <div class="leaderboard-score">${entry.score}</div>
+          <div class="rank-line">${entry.skin} skin</div>
+        </div>
+        <span class="rank-line">${entry.time}</span>
+      </li>
+    `)
+    .join("");
+}
+
 startButton.addEventListener("click", startGame);
 restartButton.addEventListener("click", restartGame);
+clearBoardButton.addEventListener("click", () => {
+  leaderboard = [];
+  saveLeaderboard();
+  rankMessageNode.textContent = "Leaderboard cleared";
+  renderLeaderboard();
+});
 
 controlButtons.forEach((button) => {
   button.addEventListener("click", () => {
+    initAudio();
+    resumeAudioContext();
     setDirection(directionFromName(button.dataset.dir));
     if (!running) {
       startGame();
@@ -357,15 +583,56 @@ window.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("touchstart", (event) => {
+  initAudio();
+  resumeAudioContext();
   const touch = event.changedTouches[0];
   touchStart = { x: touch.clientX, y: touch.clientY };
+  swipeLocked = false;
+}, { passive: true });
+
+canvas.addEventListener("touchmove", (event) => {
+  if (!touchStart || swipeLocked) {
+    return;
+  }
+  const touch = event.changedTouches[0];
+  handleSwipe({ x: touch.clientX, y: touch.clientY });
 }, { passive: true });
 
 canvas.addEventListener("touchend", (event) => {
   const touch = event.changedTouches[0];
-  handleSwipe({ x: touch.clientX, y: touch.clientY });
+  if (!swipeLocked) {
+    handleSwipe({ x: touch.clientX, y: touch.clientY });
+  }
   touchStart = null;
+  swipeLocked = false;
 }, { passive: true });
+
+canvas.addEventListener("touchcancel", () => {
+  touchStart = null;
+  swipeLocked = false;
+}, { passive: true });
+
+canvas.addEventListener("pointerdown", (event) => {
+  initAudio();
+  resumeAudioContext();
+  touchStart = { x: event.clientX, y: event.clientY };
+  swipeLocked = false;
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  if (!touchStart || swipeLocked || event.pointerType === "mouse") {
+    return;
+  }
+  handleSwipe({ x: event.clientX, y: event.clientY });
+});
+
+canvas.addEventListener("pointerup", (event) => {
+  if (!swipeLocked && event.pointerType !== "mouse") {
+    handleSwipe({ x: event.clientX, y: event.clientY });
+  }
+  touchStart = null;
+  swipeLocked = false;
+});
 
 window.addEventListener("resize", draw);
 
